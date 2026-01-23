@@ -13,10 +13,10 @@
 ### Actividad 02
 - ¿Qué es el diseño/arte generativo?
   
-| Es una exprecion creativa moderna que resulta de la fusion de: datos,storytelling, programacion, interacion y forma. Es un sistema que crea el arte.
+| Es una exprecion creativa moderna que resulta de la fusion de: datos, storytelling, programacion, interacion y forma. Es un sistema que crea el arte.
 - ¿Cómo podrías aplicar lo que has visto en tu perfil profesional?
   
-| Podria hacer una ia que estudie mi arte y empiece a generarlo por mi o crear cosas en vivo.
+| Podria hacer una ia que estudie mi arte y crear un diseño de un sistema que cree multiples salidas de este
 
 ### Actividad 03
 
@@ -26,5 +26,6 @@
 
 
 ## Bitácora de reflexión
+
 
 
