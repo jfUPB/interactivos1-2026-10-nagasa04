@@ -40,7 +40,9 @@ https://github.com/user-attachments/assets/3737996d-03cd-4fa3-95f8-83822534e357
 - ¿Por qué no funcionaba el programa con was_pressed() y por qué funciona con is_pressed()? Explica detalladamente.
 
 | was_pressed() : detecta eventos unicos como un clic
+
 | is_pressed() : envia multiplas mensajes si el boton se mantiene precionado
+
 | No funcionaba el programa con was_pressed() debido a que es un evento demasiado corto y el loop no lo atrapaba en cambio con is_pressed() mantiene el estado "true"
 
 
@@ -59,6 +61,7 @@ https://github.com/user-attachments/assets/3737996d-03cd-4fa3-95f8-83822534e357
 
 
 ## Bitácora de reflexión
+
 
 
 
