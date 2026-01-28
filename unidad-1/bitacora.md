@@ -39,7 +39,19 @@ https://github.com/user-attachments/assets/3737996d-03cd-4fa3-95f8-83822534e357
 
 - ¿Por qué no funcionaba el programa con was_pressed() y por qué funciona con is_pressed()? Explica detalladamente.
 
-| 
+| was_pressed() : detecta eventos unicos como un clic
+| is_pressed() : envia multiplas mensajes si el boton se mantiene precionado
+| No funcionaba el programa con was_pressed() debido a que es un evento demasiado corto y el loop no lo atrapaba en cambio con is_pressed() mantiene el estado "true"
+
+
+- button_a.was_pressed() para detectar si el botón ha sido presionado.
+- button_a.is_pressed() si quieres saber si el botón está presionado en ese momento.
+- was_pressed() es más adecuado para detectar eventos únicos como un clic.
+- is_pressed(), el programa podría enviar múltiples mensajes si el botón se mantiene presionado.
+- inicializar la comunicación serial con uart.init(baudrate=115200)
+- utilizamos uart.write('A') para enviar el mensaje ‘A’ cuando se presiona el botón A.
+- connectBtnClick() Esta función se ejecuta cuando el usuario hace click en el botón de conexión
+
 
 
 ## Bitácora de aplicación 
@@ -47,6 +59,7 @@ https://github.com/user-attachments/assets/3737996d-03cd-4fa3-95f8-83822534e357
 
 
 ## Bitácora de reflexión
+
 
 
 
