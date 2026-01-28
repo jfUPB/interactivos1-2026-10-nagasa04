@@ -76,7 +76,7 @@ while True:
     # Botón A → mover a la izquierda
     if button_a.is_pressed():
         uart.write("A")
-
+    # no es  else: porque mandaria el bit constantemente
     # Botón B → mover a la derecha
     elif button_b.is_pressed():
         uart.write("B")
@@ -98,6 +98,7 @@ let x;
 let connectionInitialized = false;
 
 function setup() {
+  // tamaño del lienzo
   createCanvas(400, 400);
   background(220);
 
@@ -112,6 +113,7 @@ function setup() {
 }
 
 function draw() {
+  // Color del fondo (entre mas bajito el numero mas oscuro)
   background(220);
 
   // Limpieza del buffer solo una vez al conectar
@@ -139,8 +141,10 @@ function draw() {
   x = constrain(x, 20, width - 20);
 
   // Dibujamos el círculo (antes era un rectángulo)
-  fill(150, 0, 200);
+  //color
+  fill(200, 0, 200);
   noStroke();
+  // el primer numero es la division vertical del canvas y el segundo es que tan grande es el circulo
   circle(x, height / 2, 40);
 
   // Texto dinámico del botón
@@ -161,7 +165,11 @@ function connectBtnClick() {
 }
 ```
 
+El codigo envia informacion en bits sobre si el micro:bit esta siendo precionado A o B. 
+Si se preciona A se va moviendo a la izquierda en cambio si se preciona B el circulo se mueve a la derecha.
+
 ## Bitácora de reflexión
+
 
 
 
