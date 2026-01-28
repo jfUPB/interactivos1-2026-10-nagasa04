@@ -87,7 +87,7 @@ while True:
 
 - p5.js codigo
   
-```
+``` js
 let port;
 let connectBtn;
 
@@ -169,6 +169,7 @@ El codigo envia informacion en bits sobre si el micro:bit esta siendo precionado
 Si se preciona A se va moviendo a la izquierda en cambio si se preciona B el circulo se mueve a la derecha.
 
 ## Bitácora de reflexión
+
 
 
 
