@@ -58,9 +58,111 @@ https://github.com/user-attachments/assets/3737996d-03cd-4fa3-95f8-83822534e357
 
 ## Bitácora de aplicación 
 
+### Actividad 05
 
+- El programa de p5.js.
+- El programa de micro:bit.
+- Explica detalladamente cómo funciona el sistema físico interactivo que has creado.
+
+- micro:bit codigo
+  
+``` python
+from microbit import *
+
+# Activamos el puerto serial
+uart.init(baudrate=115200)
+
+while True:
+    # Botón A → mover a la izquierda
+    if button_a.is_pressed():
+        uart.write("A")
+
+    # Botón B → mover a la derecha
+    elif button_b.is_pressed():
+        uart.write("B")
+
+    # Pausa para evitar saturar el serial
+    sleep(100)
+```
+
+- p5.js codigo
+  
+```
+let port;
+let connectBtn;
+
+// Nueva variable: posición horizontal del círculo
+let x;
+
+// Se mantiene el control de inicialización
+let connectionInitialized = false;
+
+function setup() {
+  createCanvas(400, 400);
+  background(220);
+
+  // Posición inicial del círculo
+  x = width / 2;
+
+  port = createSerial();
+
+  connectBtn = createButton("Connect to micro:bit");
+  connectBtn.position(80, 300);
+  connectBtn.mousePressed(connectBtnClick);
+}
+
+function draw() {
+  background(220);
+
+  // Limpieza del buffer solo una vez al conectar
+  if (port.opened() && !connectionInitialized) {
+    port.clear();
+    connectionInitialized = true;
+  }
+
+  // Lectura de datos seriales
+  if (port.availableBytes() > 0) {
+    let dataRx = port.read(1);
+
+    // Si llega "A", movemos a la izquierda
+    if (dataRx == "A") {
+      x -= 5;
+    }
+
+    // Si llega "B", movemos a la derecha
+    else if (dataRx == "B") {
+      x += 5;
+    }
+  }
+
+  // Evitamos que el círculo se salga del canvas
+  x = constrain(x, 20, width - 20);
+
+  // Dibujamos el círculo (antes era un rectángulo)
+  fill(150, 0, 200);
+  noStroke();
+  circle(x, height / 2, 40);
+
+  // Texto dinámico del botón
+  if (!port.opened()) {
+    connectBtn.html("Connect to micro:bit");
+  } else {
+    connectBtn.html("Disconnect");
+  }
+}
+
+function connectBtnClick() {
+  if (!port.opened()) {
+    port.open("MicroPython", 115200);
+    connectionInitialized = false;
+  } else {
+    port.close();
+  }
+}
+```
 
 ## Bitácora de reflexión
+
 
 
 
