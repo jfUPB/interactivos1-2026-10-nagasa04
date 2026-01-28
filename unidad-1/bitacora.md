@@ -170,8 +170,88 @@ Si se preciona A se va moviendo a la izquierda en cambio si se preciona B el cir
 
 ## Bitácora de reflexión
 
+### Actividad 6
 
+-micro:bit
 
+``` phyton
+from microbit import *
+
+#Activa el puerto serial
+uart.init(baudrate=115200)
+
+while True:
+    # Si A es precionado el cuadrado se vuelve rojo en cambio si no es presionado se mantiene N y se pone de color verde
+    if button_a.is_pressed():
+        uart.write('A')
+    else:
+        uart.write('N')
+    # Pausa para evitar saturar el serial
+    sleep(100)
+```
+
+- p5.js
+``` js
+  let port;
+  let connectBtn;
+  // Control de inicialización
+  let connectionInitialized = false;
+
+  function setup() {
+    // tamaño del lienzo
+    createCanvas(400, 400);
+    background(220);
+
+    // Crear el boton de conectar el micro:bit, su posicion y con que se activa
+    port = createSerial();
+    connectBtn = createButton("Connect to micro:bit");
+    connectBtn.position(80, 300);
+    connectBtn.mousePressed(connectBtnClick);
+  }
+
+  function draw() {
+    // Color del fondo
+    background(220);
+
+    // Limpia el buffes solo una vez al conectar
+    if (port.opened() && !connectionInitialized) {
+      port.clear();
+      connectionInitialized = true;
+    }
+
+    // Lectura de datos
+    if (port.availableBytes() > 0) {
+      let dataRx = port.read(1);
+      // Si llega A se pone rojo 
+      if (dataRx == "A") {
+        fill("red");
+      // Si llega N se mantiene verde
+      } else if (dataRx == "N") {
+        fill("green");
+      }
+    }
+
+    // Define el cuadrado y la posicion de el y tamaño
+    rectMode(CENTER);
+    rect(width / 2, height / 2, 50, 50);
+
+    // Texto dinamico del boton
+    if (!port.opened()) {
+      connectBtn.html("Connect to micro:bit");
+    } else {
+      connectBtn.html("Disconnect");
+    }
+  }
+
+  function connectBtnClick() {
+    if (!port.opened()) {
+      port.open("MicroPython", 115200);
+      connectionInitialized = false;
+    } else {
+      port.close();
+    }
+  }
+```
 
 
 
