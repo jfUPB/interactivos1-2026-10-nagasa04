@@ -174,7 +174,7 @@ Si se preciona A se va moviendo a la izquierda en cambio si se preciona B el cir
 
 -micro:bit
 
-``` phyton
+``` python
 from microbit import *
 
 #Activa el puerto serial
@@ -252,6 +252,7 @@ while True:
     }
   }
 ```
+
 
 
 
