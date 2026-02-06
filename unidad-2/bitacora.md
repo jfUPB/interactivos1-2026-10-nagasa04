@@ -21,7 +21,7 @@ Las acciones del programa es cuando inicia el programa empieza a contar un tiemp
 ### Actividad 2
 <img width="302" height="575" alt="image" src="https://github.com/user-attachments/assets/83f80128-a09a-4816-b80c-acc28ed1f52c" />
 
-
+``` python
 from microbit import *
 import utime
 
@@ -203,12 +203,13 @@ while True:
 
     # pequeña pausa para estabilidad
     utime.sleep_ms(20)
-´´´
+```
 
 ## Bitácora de aplicación 
 
 
 
 ## Bitácora de reflexión
+
 
 
