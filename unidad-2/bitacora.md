@@ -207,7 +207,7 @@ while True:
 
 ### Actividad 03
 
-``` phyton
+``` python
 from microbit import *
 import utime
 
@@ -391,11 +391,171 @@ while True:
 
 ## Bitácora de aplicación 
 
+``` python
 ### Actividad 04
 
+from microbit import *
+import utime
+
+# --------------------------------------------------
+# Función obligatoria para crear imágenes de llenado
+# --------------------------------------------------
+def make_fill_images(on='9', off='0'):
+    imgs = []
+    for n in range(26):
+        rows = []
+        k = 0
+        for y in range(5):
+            row = []
+            for x in range(5):
+                row.append(on if k < n else off)
+                k += 1
+            rows.append(''.join(row))
+        imgs.append(Image(':'.join(rows)))
+    return imgs
+
+FILL = make_fill_images()
+
+# --------------------
+# Clase Timer (dada)
+# --------------------
+class Timer:
+    def __init__(self, owner, event_to_post, duration):
+        self.owner = owner
+        self.event = event_to_post
+        self.duration = duration
+        self.start_time = 0
+        self.active = False
+
+    def start(self, new_duration=None):
+        if new_duration is not None:
+            self.duration = new_duration
+        self.start_time = utime.ticks_ms()
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def update(self):
+        if self.active:
+            if utime.ticks_diff(utime.ticks_ms(), self.start_time) >= self.duration:
+                self.active = False
+                self.owner.post_event(self.event)
+
+# --------------------------------------------------
+# Máquina de estados del temporizador
+# --------------------------------------------------
+class Task:
+    def __init__(self):
+        self.event_queue = []
+        self.timers = []
+
+        # Valor inicial del temporizador
+        self.count = 20
+
+        # Timer de 1 segundo
+        self.myTimer = self.createTimer("Timeout", 1000)
+
+        self.estado_actual = None
+        self.transicion_a(self.estado_config)
+
+    def createTimer(self, event, duration):
+        t = Timer(self, event, duration)
+        self.timers.append(t)
+        return t
+
+    def post_event(self, ev):
+        self.event_queue.append(ev)
+
+    def update(self):
+        # Actualiza timers
+        for t in self.timers:
+            t.update()
+
+        # Procesa eventos
+        while self.event_queue:
+            ev = self.event_queue.pop(0)
+            if self.estado_actual:
+                self.estado_actual(ev)
+
+    def transicion_a(self, nuevo_estado):
+        if self.estado_actual:
+            self.estado_actual("EXIT")
+        self.estado_actual = nuevo_estado
+        self.estado_actual("ENTRY")
+
+    # --------------------
+    # ESTADO CONFIGURACIÓN
+    # --------------------
+    def estado_config(self, ev):
+        if ev == "ENTRY":
+            display.show(FILL[self.count])
+
+        if ev == "A":
+            if self.count < 25:
+                self.count += 1
+                display.show(FILL[self.count])
+
+        if ev == "B":
+            if self.count > 15:
+                self.count -= 1
+                display.show(FILL[self.count])
+
+        if ev == "S":
+            self.transicion_a(self.estado_countdown)
+
+    # --------------------
+    # ESTADO CUENTA REGRESIVA
+    # --------------------
+    def estado_countdown(self, ev):
+        if ev == "ENTRY":
+            display.show(FILL[self.count])
+            self.myTimer.start(1000)
+
+        if ev == "Timeout":
+            self.count -= 1
+            if self.count > 0:
+                display.show(FILL[self.count])
+                self.myTimer.start(1000)
+            else:
+                self.transicion_a(self.estado_end)
+
+    # --------------------
+    # ESTADO FINAL
+    # --------------------
+    def estado_end(self, ev):
+        if ev == "ENTRY":
+            display.show(Image.SKULL)
+            music.play(music.WAWAWAWAA)
+
+        if ev == "A":
+            self.count = 20
+            self.transicion_a(self.estado_config)
+
+# --------------------
+# Loop principal
+# --------------------
+task = Task()
+
+while True:
+    if button_a.was_pressed():
+        task.post_event("A")
+
+    if button_b.was_pressed():
+        task.post_event("B")
+
+    if accelerometer.was_gesture("shake"):
+        task.post_event("S")
+
+    task.update()
+    utime.sleep_ms(20)
+```
+
+<img width="583" height="396" alt="image" src="https://github.com/user-attachments/assets/f5d17e88-20f5-48ca-8d75-f71af964195f" />
 
 
 ## Bitácora de reflexión
+
 
 
 
