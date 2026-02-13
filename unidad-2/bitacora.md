@@ -551,13 +551,15 @@ while True:
     utime.sleep_ms(20)
 ```
 
-<img width="292" height="547" alt="image" src="https://github.com/user-attachments/assets/5618fb28-1868-4ce0-be44-25e280d87dc6" />
+<img width="300" height="547" alt="image" src="https://github.com/user-attachments/assets/62fcb7d3-af65-4f21-acb0-ed6a43f6f32a" />
+
 
 
 
 ## Bitácora de reflexión
 
 ### Actividad 05
+
 
 
 
