@@ -391,9 +391,9 @@ while True:
 
 ## Bitácora de aplicación 
 
-``` python
 ### Actividad 04
 
+``` python
 from microbit import *
 import utime
 
@@ -526,7 +526,7 @@ class Task:
     def estado_end(self, ev):
         if ev == "ENTRY":
             display.show(Image.SKULL)
-            music.play(music.WAWAWAWAA)
+            audio.play(Sound.GIGGLE)
 
         if ev == "A":
             self.count = 20
@@ -551,11 +551,13 @@ while True:
     utime.sleep_ms(20)
 ```
 
-<img width="583" height="396" alt="image" src="https://github.com/user-attachments/assets/f5d17e88-20f5-48ca-8d75-f71af964195f" />
+<img width="292" height="547" alt="image" src="https://github.com/user-attachments/assets/5618fb28-1868-4ce0-be44-25e280d87dc6" />
+
 
 
 ## Bitácora de reflexión
 
+### Actividad 05
 
 
 
