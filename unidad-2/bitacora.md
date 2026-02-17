@@ -836,12 +836,12 @@ LOS 3 ESTADOS DEL TEMPORIZADOR
    - Qué hace: Muestra calavera + sonido.
    - Cómo se sale: Botón A → vuelve a Configuración (reset a 20 pixeles).
 
-¿POR QUÉ NO USAMOS sleep()?
+### ¿POR QUÉ NO USAMOS sleep()?
 ----------------------------
 Si usaras sleep(1000) para esperar 1 segundo, el programa se CONGELA y no puede detectar botones durante ese tiempo. En cambio, el Timer revisa constantemente si ya pasó el tiempo, y cuando se cumple, genera el evento "Timeout" sin bloquear nada.
 
 
-¿CÓMO FUNCIONA EL FLUJO DE EVENTOS?
+### ¿CÓMO FUNCIONA EL FLUJO DE EVENTOS?
 -------------------------------------
 1. El "while True" del ciclo principal detecta si presionaste A, B o hiciste shake.
 2. Esos eventos se meten en una COLA (event_queue).
@@ -849,7 +849,7 @@ Si usaras sleep(1000) para esperar 1 segundo, el programa se CONGELA y no puede 
 4. El estado actual decide qué hacer con ese evento.
 
 
-¿CÓMO FUNCIONA FILL[n]?
+### ¿CÓMO FUNCIONA FILL[n]?
 ------------------------
 FILL es una lista de 26 imágenes (de FILL[0] a FILL[25]).
 - FILL[0] tiene todos los LEDs apagados.
@@ -858,6 +858,7 @@ FILL es una lista de 26 imágenes (de FILL[0] a FILL[25]).
 Así visualizamos cuántos "segundos" quedan.
 
 
-¿CÓMO SE APAGAN LOS PIXELES DE ABAJO HACIA ARRIBA?
+### ¿CÓMO SE APAGAN LOS PIXELES DE ABAJO HACIA ARRIBA?
 ----------------------------------------------------
 Simplemente decrementamos pixels_actual (de 20 a 19, luego 18, etc.) y mostramos FILL[pixels_actual]. Como FILL llena de arriba-izquierda a abajo-derecha, al reducir el número se "apagan" desde abajo-derecha hacia arriba-izquierda. Exactamente lo que pide el enunciado.
+
