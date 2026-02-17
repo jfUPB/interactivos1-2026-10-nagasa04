@@ -560,7 +560,304 @@ while True:
 
 ### Actividad 05
 
+Temporizador interactivo con maquinas de estado
+
+### Paso 1: Entender el problema
+El temporizador tiene 3 estados:
+
+1. CONFIGURACIÓN: Pantalla muestra pixeles, botones A/B suben/bajan el tiempo (15-25), shake(sacudir el microbit) arma el temporizador.
+
+2. CUENTA REGRESIVA: Se apaga un pixel cada segundo hasta llegar a 0.
+
+3. ALARMA: Muestra calavera + sonido. Botón A vuelve a configuración.
+
+### Paso 2: Diagrama en PlantUML
+<img width="1168" height="308" alt="{DC57B5DB-8DC3-4322-A3EE-0E2AEFA8C642}" src="https://github.com/user-attachments/assets/c8f07bde-c16c-4b79-9079-c06d6293d24b" />
 
 
+### Paso 3: El código completo
+
+``` phyton
+from microbit import *
+import utime
+
+# ============================================================
+# 1. FUNCIÓN PARA CREAR IMÁGENES DE LLENADO (dada por el profe)
+# ============================================================
+# Genera 26 imágenes (0 a 25 pixeles encendidos).
+# FILL[0] = todo apagado, FILL[25] = todo encendido.
+# Los pixeles se llenan fila por fila, de arriba-izquierda
+# a abajo-derecha.
+
+def make_fill_images(on='9', off='0'):
+    imgs = []
+    for n in range(26):
+        rows = []
+        k = 0
+        for y in range(5):
+            row = []
+            for x in range(5):
+                row.append(on if k < n else off)
+                k += 1
+            rows.append(''.join(row))
+        imgs.append(Image(':'.join(rows)))
+    return imgs
+
+FILL = make_fill_images()
+
+# ============================================================
+# 2. CLASE TIMER (dada por el profe)
+# ============================================================
+# Maneja tiempos sin usar sleep().
+# Cuando el tiempo se cumple, posta un evento a la máquina.
+
+class Timer:
+    def __init__(self, owner, event_to_post, duration):
+        self.owner = owner
+        self.event = event_to_post
+        self.duration = duration
+        self.start_time = 0
+        self.active = False
+
+    def start(self, new_duration=None):
+        if new_duration is not None:
+            self.duration = new_duration
+        self.start_time = utime.ticks_ms()
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def update(self):
+        if self.active:
+            if utime.ticks_diff(utime.ticks_ms(), self.start_time) >= self.duration:
+                self.active = False
+                self.owner.post_event(self.event)
+
+# ============================================================
+# 3. IMAGEN DE CALAVERA (para el estado de alarma)
+# ============================================================
+
+SKULL = Image(
+    "09990:"
+    "99099:"
+    "09990:"
+    "09990:"
+    "90909"
+)
+
+# ============================================================
+# 4. CLASE TASK — LA MÁQUINA DE ESTADOS
+# ============================================================
+# Aquí está toda la lógica del temporizador.
+#
+# ESTADOS:
+#   estado_configuracion  -> el usuario ajusta los pixeles
+#   estado_cuenta         -> cuenta regresiva (1 pixel/segundo)
+#   estado_alarma         -> muestra calavera y suena speaker
+#
+# EVENTOS:
+#   "A"       -> botón A presionado
+#   "B"       -> botón B presionado
+#   "S"       -> gesto shake detectado
+#   "Timeout" -> el Timer de 1 segundo se cumplió
+#   "ENTRY"   -> se acaba de entrar a este estado
+#   "EXIT"    -> se está saliendo de este estado
+
+class Task:
+    def __init__(self):
+        self.event_queue = []
+        self.timers = []
+
+        # Timer de 1 segundo para la cuenta regresiva
+        self.countdown_timer = self.createTimer("Timeout", 1000)
+
+        # Variables del temporizador
+        self.pixels = 20          # valor inicial: 20 pixeles
+        self.pixels_actual = 20   # pixeles que quedan en cuenta regresiva
+
+        # Estado inicial
+        self.estado_actual = None
+        self.transicion_a(self.estado_configuracion)
+
+    def createTimer(self, event, duration):
+        t = Timer(self, event, duration)
+        self.timers.append(t)
+        return t
+
+    def post_event(self, ev):
+        self.event_queue.append(ev)
+
+    def update(self):
+        # 1. Actualizar todos los timers
+        for t in self.timers:
+            t.update()
+        # 2. Procesar cola de eventos
+        while len(self.event_queue) > 0:
+            ev = self.event_queue.pop(0)
+            if self.estado_actual:
+                self.estado_actual(ev)
+
+    def transicion_a(self, nuevo_estado):
+        if self.estado_actual:
+            self.estado_actual("EXIT")
+        self.estado_actual = nuevo_estado
+        self.estado_actual("ENTRY")
+
+    # --------------------------------------------------------
+    # ESTADO: CONFIGURACIÓN
+    # --------------------------------------------------------
+    # - Muestra en pantalla la cantidad de pixeles configurados.
+    # - Botón A: sube pixeles (máximo 25).
+    # - Botón B: baja pixeles (mínimo 15).
+    # - Shake: arma el temporizador → pasa a cuenta regresiva.
+
+    def estado_configuracion(self, ev):
+        if ev == "ENTRY":
+            # Al entrar, mostramos los pixeles configurados
+            display.show(FILL[self.pixels])
+
+        elif ev == "A":
+            # Aumentar pixeles (máximo 25)
+            if self.pixels < 25:
+                self.pixels += 1
+                display.show(FILL[self.pixels])
+
+        elif ev == "B":
+            # Disminuir pixeles (mínimo 15)
+            if self.pixels > 15:
+                self.pixels -= 1
+                display.show(FILL[self.pixels])
+
+        elif ev == "S":
+            # Shake: armar temporizador → ir a cuenta regresiva
+            self.pixels_actual = self.pixels
+            self.transicion_a(self.estado_cuenta)
+
+        elif ev == "EXIT":
+            pass
+
+    # --------------------------------------------------------
+    # ESTADO: CUENTA REGRESIVA
+    # --------------------------------------------------------
+    # - Se apaga 1 pixel cada segundo (de abajo-derecha hacia
+    #   arriba-izquierda).
+    # - Cuando llega a 0 → pasa a alarma.
+    # - No responde a botones durante la cuenta.
+
+    def estado_cuenta(self, ev):
+        if ev == "ENTRY":
+            # Mostrar los pixeles actuales e iniciar el timer
+            display.show(FILL[self.pixels_actual])
+            self.countdown_timer.start(1000)
+
+        elif ev == "Timeout":
+            # Se cumplió 1 segundo: apagar un pixel
+            self.pixels_actual -= 1
+
+            if self.pixels_actual > 0:
+                # Aún quedan pixeles: mostrar y reiniciar timer
+                display.show(FILL[self.pixels_actual])
+                self.countdown_timer.start(1000)
+            else:
+                # Llegó a 0: mostrar el último frame (todo apagado)
+                # y pasar a alarma
+                display.show(FILL[0])
+                self.transicion_a(self.estado_alarma)
+
+        elif ev == "EXIT":
+            # Detener el timer al salir
+            self.countdown_timer.stop()
+
+    # --------------------------------------------------------
+    # ESTADO: ALARMA
+    # --------------------------------------------------------
+    # - Muestra la calavera en pantalla.
+    # - Suena el speaker.
+    # - Botón A: vuelve a configuración con 20 pixeles.
+
+    def estado_alarma(self, ev):
+        if ev == "ENTRY":
+            # Mostrar calavera y sonar
+            display.show(SKULL)
+            music.play(music.BADDY, wait=False)
+
+        elif ev == "A":
+            # Reiniciar: volver a configuración con 20 pixeles
+            self.pixels = 20
+            self.transicion_a(self.estado_configuracion)
+
+        elif ev == "EXIT":
+            pass
+
+# ============================================================
+# 5. CICLO PRINCIPAL
+# ============================================================
+# Aquí se generan los eventos de hardware y se actualiza
+# la máquina de estados. NO se usa sleep() largo,
+# solo sleep_ms(20) para no saturar el procesador.
+
+import music
+
+task = Task()
+
+while True:
+    # Generar eventos de los sensores
+    if button_a.was_pressed():
+        task.post_event("A")
+    if button_b.was_pressed():
+        task.post_event("B")
+    if accelerometer.was_gesture("shake"):
+        task.post_event("S")
+
+    # Actualizar la máquina de estados y sus timers
+    task.update()
+
+    # Pequeña pausa para no saturar el CPU
+    utime.sleep_ms(20)
+```
+### TEMPORIZADOR INTERACTIVO CON MÁQUINA DE ESTADOS — EXPLICACIÓN PASO A PASO
+
+¿QUÉ ES UNA MÁQUINA DE ESTADOS?
+Piensa en ella como un diagrama de flujo donde tu programa solo puede estar en UN estado a la vez, y salta de uno a otro cuando ocurre un EVENTO (presionar un botón, que pase un segundo, etc.).
 
 
+LOS 3 ESTADOS DEL TEMPORIZADOR
+
+1. CONFIGURACIÓN
+   - Qué hace: Muestra pixeles en pantalla. Botón A sube, Botón B baja (entre 15 y 25).
+   - Cómo se sale: Shake → va a Cuenta Regresiva.
+
+2. CUENTA REGRESIVA
+   - Qué hace: Cada segundo apaga un pixel (de abajo hacia arriba).
+   - Cómo se sale: Cuando llega a 0 → va a Alarma.
+
+3. ALARMA
+   - Qué hace: Muestra calavera + sonido.
+   - Cómo se sale: Botón A → vuelve a Configuración (reset a 20 pixeles).
+
+¿POR QUÉ NO USAMOS sleep()?
+----------------------------
+Si usaras sleep(1000) para esperar 1 segundo, el programa se CONGELA y no puede detectar botones durante ese tiempo. En cambio, el Timer revisa constantemente si ya pasó el tiempo, y cuando se cumple, genera el evento "Timeout" sin bloquear nada.
+
+
+¿CÓMO FUNCIONA EL FLUJO DE EVENTOS?
+-------------------------------------
+1. El "while True" del ciclo principal detecta si presionaste A, B o hiciste shake.
+2. Esos eventos se meten en una COLA (event_queue).
+3. task.update() primero revisa los timers (¿ya pasó 1 segundo?) y luego procesa cada evento de la cola, enviándolo al estado actual.
+4. El estado actual decide qué hacer con ese evento.
+
+
+¿CÓMO FUNCIONA FILL[n]?
+------------------------
+FILL es una lista de 26 imágenes (de FILL[0] a FILL[25]).
+- FILL[0] tiene todos los LEDs apagados.
+- FILL[20] tiene 20 LEDs encendidos (4 filas completas).
+- FILL[25] tiene los 25 encendidos.
+Así visualizamos cuántos "segundos" quedan.
+
+
+¿CÓMO SE APAGAN LOS PIXELES DE ABAJO HACIA ARRIBA?
+----------------------------------------------------
+Simplemente decrementamos pixels_actual (de 20 a 19, luego 18, etc.) y mostramos FILL[pixels_actual]. Como FILL llena de arriba-izquierda a abajo-derecha, al reducir el número se "apagan" desde abajo-derecha hacia arriba-izquierda. Exactamente lo que pide el enunciado.
