@@ -298,9 +298,33 @@ class Temporizador(FSMTask):
 
 <details>
 
-<summary>fsm.js</summary>
+<summary>index.html</summary>
+
+``` html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sketch</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.js"></script>
+    <script src="https://unpkg.com/@gohai/p5.webserial@^1/libraries/p5.webserial.js"></script>
+  </head>
+  <body>
+    <script src="sketch.js"></script>
+  </body>
+</html>
+```
+
+</details>
+
+<details>
+
+<summary>sketch.js</summary>
 
 ``` js
+// ── FSM ───────────────────────────────────────────────────────────────────
 const ENTRY = "ENTRY";
 const EXIT = "EXIT";
 
@@ -364,44 +388,8 @@ class FSMTask {
     }
   }
 }
-```
 
-</details>
-
-<details>
-
-<summary>index.html</summary>
-
-``` html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Sketch</title>
-
-    <link rel="stylesheet" type="text/css" href="style.css">
-
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.js"></script>
-    <!-- opcional: para comunicarse con micro:bit vía USB serial -->
-    <script src="https://cdn.jsdelivr.net/npm/p5.serialport@1.0.3/lib/p5.serialport.js"></script>
-  </head>
-
-  <body>
-    <script src="fsm.js"></script>
-    <script src="sketch.js"></script>
-  </body>
-</html>
-```
-
-</details>
-
-<details>
-
-<summary>sketch.js</summary>
-
-``` js
+// ── Temporizador ──────────────────────────────────────────────────────────
 const TIMER_LIMITS = {
   min: 15,
   max: 25,
@@ -415,43 +403,27 @@ const EVENTS = {
   TICK: "Timeout",
 };
 
-const UI = {
-  dialSize: 250,
-  ringWeight: 20,
-  bigText: 100,
-  configText: 120,
-  helpText: 18,
-};
-
-
 class Temporizador extends FSMTask {
   constructor(minValue, maxValue, defaultValue) {
     super();
-
     this.minValue = minValue;
     this.maxValue = maxValue;
     this.defaultValue = defaultValue;
     this.configValue = defaultValue;
     this.totalSeconds = defaultValue;
     this.remainingSeconds = defaultValue;
-
-    // history para detectar A-B-A
     this.keyHistory = [];
-
     this.myTimer = this.addTimer(EVENTS.TICK, 1000);
     this.transitionTo(this.estado_config);
-
   }
 
   get currentState() {
     return this.state;
   }
 
-  // override postEvent para capturar la historia de teclas
   postEvent(ev) {
     super.postEvent(ev);
     if (ev === EVENTS.DEC || ev === EVENTS.INC) {
-      // guardamos sólo las letras A y B
       this.keyHistory.push(ev);
       if (this.keyHistory.length > 3) this.keyHistory.shift();
     }
@@ -464,9 +436,8 @@ class Temporizador extends FSMTask {
   estado_config = (ev) => {
     if (ev === ENTRY) {
       this.configValue = this.defaultValue;
-      this.keyHistory = []; // limpiamos el historial al entrar en configuración
-    }
-    else if (ev === EVENTS.DEC) {
+      this.keyHistory = [];
+    } else if (ev === EVENTS.DEC) {
       if (this.configValue > this.minValue) this.configValue--;
     } else if (ev === EVENTS.INC) {
       if (this.configValue < this.maxValue) this.configValue++;
@@ -476,7 +447,6 @@ class Temporizador extends FSMTask {
       this.transitionTo(this.estado_armed);
     }
   };
-
 
   estado_armed = (ev) => {
     if (ev === ENTRY) {
@@ -491,7 +461,6 @@ class Temporizador extends FSMTask {
         }
       }
     } else if (ev === EVENTS.DEC) {
-      // tecla A: pausa o secuencia
       if (this.isSequence(EVENTS.DEC + EVENTS.INC + EVENTS.DEC)) {
         this.transitionTo(this.estado_config);
       } else {
@@ -500,7 +469,6 @@ class Temporizador extends FSMTask {
     } else if (ev === EXIT) {
       this.myTimer.stop();
     }
-
   };
 
   estado_timeout = (ev) => {
@@ -509,45 +477,70 @@ class Temporizador extends FSMTask {
     } else if (ev === EVENTS.DEC) {
       this.transitionTo(this.estado_config);
     }
-  }
+  };
 
-  // estado nuevo: pausado
   estado_paused = (ev) => {
     if (ev === ENTRY) {
-      // nothing special, timer is already stopped by exit of armed
     } else if (ev === EVENTS.DEC) {
-      // pulsamos A mientras está pausado
-      // primero verificamos secuencia ABA antes de reanudar
       if (this.isSequence(EVENTS.DEC + EVENTS.INC + EVENTS.DEC)) {
         this.transitionTo(this.estado_config);
       } else {
-        // si no hay secuencia, volvemos a modo armado
         this.transitionTo(this.estado_armed);
       }
     }
-    // no comprobamos la secuencia en ENTRY/EXIT para evitar recursion
   };
 }
 
+// ── p5.js ─────────────────────────────────────────────────────────────────
 let temporizador;
+let port;
+let connectBtn;
 const renderer = new Map();
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
+  textAlign(CENTER, CENTER);
+
   temporizador = new Temporizador(
     TIMER_LIMITS.min,
     TIMER_LIMITS.max,
     TIMER_LIMITS.defaultValue
   );
-  textAlign(CENTER, CENTER);
 
   renderer.set(temporizador.estado_config, () => drawConfig(temporizador.configValue));
   renderer.set(temporizador.estado_armed, () => drawArmed(temporizador.remainingSeconds, temporizador.totalSeconds, false));
   renderer.set(temporizador.estado_paused, () => drawArmed(temporizador.remainingSeconds, temporizador.totalSeconds, true));
   renderer.set(temporizador.estado_timeout, () => drawTimeout());
+
+  port = createSerial();
+  connectBtn = createButton('🔌 Conectar micro:bit');
+  connectBtn.position(10, 10);
+  connectBtn.mousePressed(() => {
+    if (!port.opened()) {
+      port.open('MicroPython', 115200);
+    } else {
+      port.close();
+    }
+  });
 }
 
 function draw() {
+  if (!port.opened()) {
+    connectBtn.html('🔌 Conectar micro:bit');
+  } else {
+    connectBtn.html('✅ Desconectar');
+  }
+
+  if (port.availableBytes() > 0) {
+    let data = port.readUntil('\n');
+    if (data) {
+      data = data.trim().toUpperCase();
+      if (data === 'A') temporizador.postEvent(EVENTS.DEC);
+      if (data === 'B') temporizador.postEvent(EVENTS.INC);
+      if (data === 'X') temporizador.postEvent(EVENTS.START);
+    }
+  }
+
   temporizador.update();
   renderer.get(temporizador.currentState)?.();
 }
@@ -599,52 +592,12 @@ function keyPressed() {
   if (key === "s" || key === "S") temporizador.postEvent(EVENTS.START);
 }
 
-// micro:bit serial support -------------------------------------------------
-let serial;
-
-function setupSerial() {
-  serial = new p5.SerialPort();
-  serial.on('data', serialEvent);
-  // cambiar el puerto según corresponda; /dev/ttyACM0 es común en Linux
-  serial.open('/dev/ttyACM0');
-}
-
-function serialEvent() {
-  let data = serial.readStringUntil('\n');
-  if (!data) return;
-  data = data.trim().toUpperCase();
-  if (data === 'A') temporizador.postEvent(EVENTS.DEC);
-  if (data === 'B') temporizador.postEvent(EVENTS.INC);
-  // puedes enviar otras letras desde el micro:bit para más acciones
-}
-
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
 ```
 
 </details>
-
-<details>
-
-<summary>micro:bit</summary>
-
-``` py
-from microbit import *
-import utime
-
-while True:
-    if button_a.was_pressed():
-        uart.write('A\n')
-    if button_b.was_pressed():
-        uart.write('B\n')
-    if accelerometer.was_gesture('shake'):
-        uart.write('X\n')
-    utime.sleep_ms(100)
-```
-
-</details>
-
 
 ## Bitácora de reflexión
 
@@ -1043,3 +996,4 @@ function windowResized() {
 ```
 
 </details>
+
