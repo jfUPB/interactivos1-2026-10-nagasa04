@@ -274,3 +274,75 @@ module.exports = MicrobitV2Adapter;
 
 ## Bitácora de reflexión
 
+### Actividad 03
+
+### Componentes principales
+
+1. **Hardware**
+   - **Micro:bit** con firmware fijo (envía tramas seriales a 115200 baudios).
+   - El micro:bit actúa como sensor (acelerómetro y botones) y transmisor de datos.
+
+2. **Capa de backend (servidor)**
+   - `bridgeServer.js` (Node.js): servidor WebSocket que hace de puente entre serial y navegador.
+   - `adapters/MicrobitV2Adapter.js` (Adapter): lee la serie, valida el checksum y emite objetos JSON.
+
+3. **Capa de transporte (WebSocket)**
+   - `bridgeClient.js` (navegador): cliente WebSocket que recibe los objetos JSON y genera eventos.
+
+4. **Capa frontend (p5.js)**
+   - `sketch.js`: máquina de estados (PainterTask) que procesa los datos y dibuja en pantalla.
+
+### Flujo de datos
+
+1. El micro:bit envía tramas seriales al PC:
+   - Formato: `$T:tiempo|X:...|Y:...|A:...|B:...|CHK:...\n`
+   - Frecuencia: 10 Hz.
+
+2. `MicrobitV2Adapter` (Node.js):
+   - Recibe bytes del puerto serie.
+   - Construye líneas completas hasta el `\n`.
+   - Parsea los campos (X, Y, A, B, CHK).
+   - Valida checksum. Si falla, **descarta** la trama y escribe un warning.
+   - Emite `{ x, y, btnA, btnB }` cuando la trama es válida.
+
+3. `bridgeServer.js` (Node.js):
+   - Escucha conexiones WebSocket.
+   - Cuando un cliente se conecta, envía mensajes de estado.
+   - Reenvía cada objeto `{x,y,btnA,btnB}` como mensaje JSON tipo `microbit`.
+
+4. `bridgeClient.js` (navegador):
+   - Se conecta al servidor WS.
+   - Recibe mensajes JSON y dispara `EVENTS.DATA` con los valores.
+
+5. `PainterTask` (p5.js):
+   - En `updateLogic(data)`: mapea valores crudos a parámetros de dibujo.
+   - En `drawRunning()`: usa esos parámetros para dibujar la forma generativa.
+
+### Diagrama del sistema
+
+```
+[Micro:bit (HW)]
+    |  (serial 115200, líneas $...\n)
+    v
+[MicrobitV2Adapter.js]  <-- valida checksum, genera {x,y,btnA,btnB}
+    |  (JSON internal)
+    v
+[bridgeServer.js]  <-- reenvía por WebSocket
+    |  (JSON via WS)
+    v
+[bridgeClient.js]  <-- dispara EVENTS.DATA
+    |  (evento interno)
+    v
+[PainterTask en sketch.js]  <-- updateLogic() + drawRunning()
+    |  (render)
+    v
+[p5.js canvas] (arte generativo)
+```
+
+### Interacciones clave
+
+- **Hardware → Backend**: El micro:bit envía datos continuos (10 Hz) al puerto serie.
+- **Backend → Transporte**: El adaptador emite datos normalizados, el servidor los envía por WebSocket.
+- **Transporte → Frontend**: El cliente recibe datos y los transforma en eventos `DATA`.
+- **Frontend → Renderizado**: El renderer dibuja sólo si recibe datos válidos y el botón A está "presionado".
+
