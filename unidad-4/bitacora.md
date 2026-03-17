@@ -414,98 +414,617 @@ map(data.y, -2048, 2047, 2, 10)
 - `console.warn()` solo en browser, no permanente
 - **Mejora**: endpoint API para guardar logs en servidor
 
----
-
-### Para la sustentación
-
-**Prepara estas respuestas**:
-
-1. **"¿Cómo el hardware se conecta con p5.js?"**
-   → Adapter → WebSocket → FSM → canvas... (mostrar diagrama)
-
-2. **"¿Qué sucede si la trama viene corrupta?"**
-   → Se descarta, se registra warn, canvas no cambia
-
-3. **"¿Por qué X controla radio e Y controla resolución?"**
-   → Porque el prototipo original usaba mouseX y mouseY para eso
-
-4. **"¿Dónde está la lógica de transición de color?"**
-   → En updateLogic(), detección `prevB && !btnB`
-
-5. **"¿Qué pasa si presiono botón A?"**
-   → `btnA=true` → `drawRunning()` dibuja polígonos
-
 ## Bitácora de reflexión
 
-### Actividad 03
+# Actividad 03
 
-### Componentes principales
+### Objetivo 🎯
 
-1. **Hardware**
-   - **Micro:bit** con firmware fijo (envía tramas seriales a 115200 baudios).
-   - El micro:bit actúa como sensor (acelerómetro y botones) y transmisor de datos.
+Construir en la bitácora un **diagrama detallado y completo** del sistema físico interactivo realizado en la Actividad 02.
 
-2. **Capa de backend (servidor)**
-   - `bridgeServer.js` (Node.js): servidor WebSocket que hace de puente entre serial y navegador.
-   - `adapters/MicrobitV2Adapter.js` (Adapter): lee la serie, valida el checksum y emite objetos JSON.
+Este diagrama debe permitir que **cualquier persona** (profesor, evaluador, compañero) entienda:
+- ¿Cuáles son los **componentes** del sistema?
+- ¿Cómo fluye la **información** entre ellos?
+- ¿Qué **interacciones** suceden?
+- ¿Dónde están los **puntos críticos** (validación, transiciones)?
 
-3. **Capa de transporte (WebSocket)**
-   - `bridgeClient.js` (navegador): cliente WebSocket que recibe los objetos JSON y genera eventos.
+---
 
-4. **Capa frontend (p5.js)**
-   - `sketch.js`: máquina de estados (PainterTask) que procesa los datos y dibuja en pantalla.
+### Panorama General del Sistema
 
-### Flujo de datos
-
-1. El micro:bit envía tramas seriales al PC:
-   - Formato: `$T:tiempo|X:...|Y:...|A:...|B:...|CHK:...\n`
-   - Frecuencia: 10 Hz.
-
-2. `MicrobitV2Adapter` (Node.js):
-   - Recibe bytes del puerto serie.
-   - Construye líneas completas hasta el `\n`.
-   - Parsea los campos (X, Y, A, B, CHK).
-   - Valida checksum. Si falla, **descarta** la trama y escribe un warning.
-   - Emite `{ x, y, btnA, btnB }` cuando la trama es válida.
-
-3. `bridgeServer.js` (Node.js):
-   - Escucha conexiones WebSocket.
-   - Cuando un cliente se conecta, envía mensajes de estado.
-   - Reenvía cada objeto `{x,y,btnA,btnB}` como mensaje JSON tipo `microbit`.
-
-4. `bridgeClient.js` (navegador):
-   - Se conecta al servidor WS.
-   - Recibe mensajes JSON y dispara `EVENTS.DATA` con los valores.
-
-5. `PainterTask` (p5.js):
-   - En `updateLogic(data)`: mapea valores crudos a parámetros de dibujo.
-   - En `drawRunning()`: usa esos parámetros para dibujar la forma generativa.
-
-### Diagrama del sistema
+El sistema es un **arte generativo interactivo** controlado por micro:bit. Un dispositivo físico envía datos (acelerómetro + botones) que se convierten en arte visual en tiempo real.
 
 ```
-[Micro:bit (HW)]
-    |  (serial 115200, líneas $...\n)
-    v
-[MicrobitV2Adapter.js]  <-- valida checksum, genera {x,y,btnA,btnB}
-    |  (JSON internal)
-    v
-[bridgeServer.js]  <-- reenvía por WebSocket
-    |  (JSON via WS)
-    v
-[bridgeClient.js]  <-- dispara EVENTS.DATA
-    |  (evento interno)
-    v
-[PainterTask en sketch.js]  <-- updateLogic() + drawRunning()
-    |  (render)
-    v
-[p5.js canvas] (arte generativo)
+[MUNDO FÍSICO]              [COMPUTADORA]                 [NAVEGADOR]
+┌──────────────┐         ┌─────────────────────┐         ┌──────────┐
+│  Micro:bit   │────────→│  Node.js            │────────→│  p5.js   │
+│ (aceleróm.)  │ Serial  │ (WebSocket Server)  │  WS     │  (Canvas)│
+│  (botones)   │ 115200  │ (MicrobitV2Adapter) │         │          │
+└──────────────┘         └─────────────────────┘         └──────────┘
+     |                           |                            |
+     │ Datos continuos           │ JSON normalizado           │ Renderizado
+     │ 10 Hz                     │ por segundo                │ ~60fps
+     └─────────────────────────────────────────────────────────┘
 ```
 
-### Interacciones clave
+---
 
-- **Hardware → Backend**: El micro:bit envía datos continuos (10 Hz) al puerto serie.
-- **Backend → Transporte**: El adaptador emite datos normalizados, el servidor los envía por WebSocket.
-- **Transporte → Frontend**: El cliente recibe datos y los transforma en eventos `DATA`.
-- **Frontend → Renderizado**: El renderer dibuja sólo si recibe datos válidos y el botón A está "presionado".
+## Componentes del Sistema (Detallado)
 
+### 1️⃣ Hardware: Micro:bit con Firmware Fijo
+
+**Características**:
+- **Procesador**: ARM Cortex-M0
+- **Sensores**: Acelerómetro (MEMS)
+- **Entrada de usuario**: Botones A y B
+- **Salida**: Puerto UART (puerto serie)
+
+**Qué envía**:
+```
+┌────────────────────────────────────────────────────────┐
+│  Trama serial cada 100ms (10 Hz)                       │
+├────────────────────────────────────────────────────────┤
+│ Formato: $T:tiempo|X:acel_x|Y:acel_y|A:btn|B:btn|CHK  │
+│                                                  \n    │
+│ Ejemplo: $T:45020|X:-245|Y:12|A:1|B:0|CHK:258 \n      │
+│                                                        │
+│ Significado:                                          │
+│ - T:45020     → Timestamp 45020ms desde arranque      │
+│ - X:-245      → Eje X acelerómetro = -245             │
+│ - Y:12        → Eje Y acelerómetro = 12              │
+│ - A:1         → Botón A presionado (1=sí, 0=no)      │
+│ - B:0         → Botón B soltado                      │
+│ - CHK:258     → Checksum (validación)                │
+└────────────────────────────────────────────────────────┘
+```
+
+**Rango de valores**:
+| Campo | Rango | Descripción |
+|-------|-------|-------------|
+| X, Y | -2048 a 2047 | Acelerómetro (16 bits con signo) |
+| A, B | 0 o 1 | Digital (botón no presionado = 0, presionado = 1) |
+| CHK | 0-999 | Checksum: \|X\| + \|Y\| + A + B |
+
+---
+
+### 2️⃣ Adaptador Serial: MicrobitV2Adapter.js
+
+**Responsabilidad**: Leer puerto serie, validar datos, emitir JSON limpio
+
+**Ubicación**: Backend (Node.js) → `adapters/MicrobitV2Adapter.js`
+
+**Flujo interno**:
+
+```
+Bytes del puerto serie
+        ↓
+┌──────────────────────┐
+│  Buffer acumulativo  │  _onChunk(chunk)
+│  this.buf += chunk   │
+└──────────────────────┘
+        ↓  (busca \n)
+┌──────────────────────┐
+│  Línea completa      │  Ej: "$T:45020|X:-245|Y:12|A:1|B:0|CHK:258"
+│  this.buf.indexOf(\n)│
+└──────────────────────┘
+        ↓
+┌──────────────────────┐
+│  Parsing             │  _parseLine(line)
+│  Split por "|"       │
+│  Split por ":"       │
+│  Convertir a números │
+└──────────────────────┘
+        ↓
+┌──────────────────────┐
+│  Validación Checksum │  computed = |X| + |Y| + A + B
+│  computed === chk?   │  Si NO coincide → return null
+└──────────────────────┘
+        ↓ (SI válida)
+┌──────────────────────┐
+│  Emitir JSON         │  {x:-245, y:12, btnA:true, btnB:false}
+│  this.onData?.(obj)  │
+└──────────────────────┘
+        ↓
+bridgeServer.js (recibe)
+```
+
+**Ejemplo: Trama corrupta**:
+```
+Trama recibida: "$T:45020|X:-245|Y:12|A:1|B:0|CHK:100\n"
+                                                      ↑ Erróneo
+
+Cálculo:  computed = |-245| + |12| + 1 + 0 = 258
+          chk (recibido) = 100
+          
+Resultado: 258 ≠ 100 → return null
+           NO emite onData()
+           console.warn("Corrupt frame...")
+           Canvas MANTIENE estado anterior (seguro)
+```
+
+---
+
+### 3️⃣ Servidor WebSocket: bridgeServer.js
+
+**Responsabilidad**: Conectar hardware con navegador, retransmitir datos
+
+**Ubicación**: Backend (Node.js) → `bridgeServer.js`
+
+**Arquitectura**:
+
+```
+┌─────────────────────────────────────────────┐
+│         bridgeServer.js (Node.js)           │
+├─────────────────────────────────────────────┤
+│                                              │
+│  WebSocketServer (puerto 8081)               │
+│       ↑ (clientes del navegador)            │
+│       │                                      │
+│  ┌────┴────────────────────────────────┐    │
+│  │ adapter.onData(obj) → broadcast()   │    │
+│  │ Recibe {x,y,btnA,btnB}              │    │
+│  │ Envía JSON a TODOS los clientes     │    │
+│  └────┬────────────────────────────────┘    │
+│       │                                      │
+│  ┌────┴────────────────────────────────┐    │
+│  │ Estado de conexión + eventos        │    │
+│  │ status: "ready|connected|error"     │    │
+│  └────────────────────────────────────┘    │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+**JSON enviado por WS**:
+```javascript
+// Tipo 1: Estado
+{
+  "type": "status",
+  "state": "connected",
+  "detail": "sim running at 30Hz",
+  "t": 1710699345000
+}
+
+// Tipo 2: Datos hardware
+{
+  "type": "microbit",
+  "x": -245,
+  "y": 12,
+  "btnA": true,
+  "btnB": false,
+  "t": 1710699345000
+}
+```
+
+---
+
+### 4️⃣ Cliente WebSocket: bridgeClient.js
+
+**Responsabilidad**: Conectar navegador con servidor, traducir JSON a eventos
+
+**Ubicación**: Frontend (navegador) → `bridgeClient.js`
+
+**Máquina de estados interna**:
+
+```
+┌──────────────────┐
+│   WebSocket      │
+│   (cerrado)      │
+└────────┬─────────┘
+         │
+    User: Click "Connect"
+         ↓
+    ┌──────────────────┐
+    │ ws.open()        │
+    │ new WebSocket()  │
+    └────────┬─────────┘
+             │
+        WS onopen
+             ↓ (conexión stablecida)
+        ┌─────────────────┐
+        │ send({cmd:...}) │
+        │ Listo para datos│
+        └────────┬────────┘
+                 │
+        WS onmessage
+                 ↓
+        ┌──────────────────────────┐
+        │ Parse JSON               │
+        │ tipo=="microbit" ?        │
+        └────────┬─────────────────┘
+                 │
+         YES (datos hardware)
+                 ↓
+        ┌──────────────────────────┐
+        │ this._onData?.(msg)      │
+        │ painter.postEvent(DATA)  │
+        └──────────────────────────┘
+```
+
+---
+
+### 5️⃣ Máquina de Estados: PainterTask (sketch.js)
+
+**Responsabilidad**: Gestionar lifecycle de la aplicación y renderizado
+
+**Ubicación**: Frontend (navegador) → `sketch.js` (clase PainterTask)
+
+**Diagrama de estados**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Máquina de Estados (FSM)                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌───────────────────────────┐                               │
+│  │  estado_esperando         │                               │
+│  │                           │                               │
+│  │  • cursor() visible       │                               │
+│  │  • esperando conexión     │                               │
+│  │  • parado (no dibuja)     │                               │
+│  └──────────┬────────────────┘                               │
+│             │                                                │
+│             │ EVENTS.CONNECT                                │
+│             │ (usuario hace clic "Connect")                 │
+│             ↓                                                │
+│  ┌───────────────────────────┐                               │
+│  │  estado_corriendo         │                               │
+│  │  (ENTRY)                  │                               │
+│  │  • noCursor()             │                               │
+│  │  • background(255)        │                               │
+│  │  • prevA=false,prevB=false│                               │
+│  │                           │                               │
+│  │  (PROCESANDO)             │                               │
+│  │  • Cada frame: draw()     │                               │
+│  │  • Si DATA event:         │                               │
+│  │    → updateLogic()        │                               │
+│  │    → drawRunning()        │                               │
+│  │  • Si prevB && !btnB:     │                               │
+│  │    → cambiar color        │                               │
+│  │                           │                               │
+│  │  (EXIT)                   │                               │
+│  │  • cursor()               │                               │
+│  └──────────┬────────────────┘                               │
+│             │                                                │
+│             │ EVENTS.DISCONNECT                             │
+│             │ (error o usuario desconecta)                  │
+│             ↓                                                │
+│             └────→ estado_esperando                         │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**updateLogic(data)** - Mapeo de valores:
+
+```javascript
+// ENTRADA: {x:-245, y:12, btnA:true, btnB:false}
+
+// PASO 1: Mapeo eje X
+const radius = map(x, -2048, 2047, -width/2, width/2)
+              = map(-245, -2048, 2047, -360, 360)
+              ≈ -43.6 pixels
+
+// PASO 2: Mapeo eje Y
+const circleResolution = int(map(y, -2048, 2047, 2, 10))
+                        = int(map(12, -2048, 2047, 2, 10))
+                        ≈ 6 vértices (hexágono)
+
+// PASO 3: Guardar en estado
+this.rxData = {
+  radius: -43.6,
+  circleResolution: 6,
+  btnA: true,      ← Activar dibujo
+  btnB: false,     ← Sin relleno
+  ready: true
+}
+
+// PASO 4: Detectar transición de botón B
+if (prevB && !btnB) {
+  this.c = color(random(255), random(255), random(255))
+  // Cambiar color si se suelta B
+}
+```
+
+**drawRunning()** - Renderizado puro:
+
+```javascript
+// Dibuja SOLO si btnA === true (como mouseIsPressed original)
+
+if (mb.btnA) {
+  push();
+  translate(width/2, height/2);   // Centro del canvas
+  rotate(radians(painter.angle)); // Rotación acumulativa
+  
+  // Relleno controlado por botón B
+  if (mb.btnB) {
+    fill(34, 45, 122, 50);        // Azul semitransparente
+  } else {
+    noFill();                       // Solo outline
+  }
+  
+  // Dibujar polígono regular
+  stroke(painter.c);              // Color (cambia al soltar B)
+  beginShape();
+  for (let i = 0; i <= circleResolution; i++) {
+    const θ = TAU / circleResolution * i;
+    const x = cos(θ) * radius;
+    const y = sin(θ) * radius;
+    vertex(x, y);
+  }
+  endShape();
+  
+  painter.angle += 1;  // Rotación continua
+  pop();
+}
+```
+
+---
+
+### 6️⃣ Renderizado: p5.js Canvas
+
+**Responsabilidad**: Mostrar arte generativo visual
+
+**Canvas**:
+- Tamaño: adaptado a ventana (`windowWidth` x `windowHeight`)
+- Contenido: polígonos rotatorios
+- Controlado por valores de acelerómetro
+
+**Ejemplo visual** (texto):
+```
+Cuando acelerómetro X = 0, Y = 100:
+  radius ≈ 0 (punto pequeño)
+  circleResolution = 8 (octágono)
+  → Se ve como punto/estrella pequeña
+
+Cuando acelerómetro X = 1500, Y = -500:
+  radius ≈ 250 (grande)
+  circleResolution = 3 (triángulo)
+  → Se ve como triángulo grande girando
+
+Cuando botón A presionado Y botón B presionado:
+  Relleno azul semitransparente + outline
+  → Efecto opaco
+
+Cuando botón A presionado Y botón B soltado:
+  Solo outline, sin relleno
+  → Efecto transparente
+```
+
+---
+
+### Flujo Completo de Datos
+
+### Ejemplo: Usuario inclina micro:bit y presiona botón B
+
+```
+TIEMPO 0ms: Usuario rota micro:bit hacia la derecha (X=500)
+│
+├─→ Acelerómetro detecta: X=500
+│
+├─→ Micro:bit firmware genera trama:
+│   $T:50|X:500|Y:-300|A:1|B:1|CHK:301\n
+│
+└─→ ENVÍA por UART (115200 baud)
+
+TIEMPO ~1ms: Datos llegan al puerto serial del PC
+│
+├─→ MicrobitV2Adapter._onChunk() recibe bytes
+│
+├─→ Acumula en buffer hasta \n
+│
+├─→ _parseLine() extrae campos:
+│   X=500, Y=-300, A=1, B=1, CHK=301
+│
+├─→ Valida checksum:
+│   computed = |500| + |-300| + 1 + 1 = 802
+│   ¡ESPERA! 802 ≠ 301 → Trama CORRUPTA
+│
+├─→ return null
+│   NO emite onData()
+│   canvas MANTIENE dibujo anterior
+│
+└─→ console.warn("Corrupt frame...")
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(Si trama fuera válida, siguería así:)
+
+TIEMPO ~1ms: MicrobitV2Adapter.onData({x:500, y:-300, btnA:true, btnB:true})
+│
+├─→ bridgeServer.js recibe evento
+│
+├─→ broadcast() envía JSON por WebSocket:
+│   {type:"microbit", x:500, y:-300, btnA:true, btnB:true, t:...}
+│
+└─→ A TODOS los navegadores conectados
+
+TIEMPO ~2ms: bridgeClient.js en navegador recibe JSON
+│
+├─→ onmessage() dispara
+│
+├─→ Verifica type==="microbit" ✓
+│
+├─→ Emite callback this._onData?.(msg)
+│
+├─→ painter.postEvent({
+│     type: EVENTS.DATA,
+│     payload: {x:500, y:-300, btnA:true, btnB:true}
+│   })
+│
+└─→ Encola evento en FSM
+
+TIEMPO ~3ms: painter.update() procesa evento DATA
+│
+├─→ PainterTask en estado_corriendo
+│
+├─→ Call updateLogic({...})
+│
+│  ├─ radius = map(500, -2048, 2047, -360, 360) ≈ 89
+│  │
+│  ├─ circleResolution = int(map(-300, -2048, 2047, 2, 10)) ≈ 3
+│  │
+│  ├─ this.rxData.btnA = true
+│  │ this.rxData.btnB = true
+│  │
+│  ├─ Comparar: prevB && !btnB
+│  │ prevB=true (anterior), btnB=true (actual)
+│  │ true && false = false → NO cambiar color
+│  │
+│  └─ this.prevB = true (guardar estado)
+│
+└─→ updateLogic() completa
+
+TIEMPO ~4ms: draw() llama drawRunning()
+│
+├─→ mb.btnA === true → SÍ dibuja
+│
+├─→ push()
+│ translate(360, 360)     // Centro
+│ rotate(radians(142))    // Algún ángulo acumulado
+│
+├─→ mb.btnB === true → Aplicar fill
+│ fill(34, 45, 122, 50)
+│
+├─→ beginShape()
+│ for i=0 to 3:
+│   θ = 360°/3 * i = 0°, 120°, 240°
+│   vertex(cos(θ)*89, sin(θ)*89)
+│ endShape()
+│
+├─→ painter.angle += 1
+│
+├─→ pop()
+│
+└─→ Canvas updated (triángulo azul girando)
+
+TIEMPO ~16ms: Siguiente frame de p5.js (~60fps)
+│
+└─→ Si no hay nuevo evento DATA, dibuja con valores anteriores
+```
+
+---
+
+### Interacciones Clave Entre Componentes
+
+### 1. Hardware ↔ Adaptador
+| Acción | Disparador | Resultado |
+|--------|-----------|-----------|
+| Inclinar micro:bit | Cambio acelerómetro | Nueva trama serial |
+| Presionar botón A | Contacto eléctrico | A=1 en siguiente trama |
+| Soltar botón B | Apertura contacto | B=0 en siguiente trama |
+
+### 2. Adaptador ↔ Servidor
+| Acción | Disparador | Resultado |
+|--------|-----------|-----------|
+| Trama válida | Checksum correcto | adapter.onData() emite JSON |
+| Trama corrupta | Checksum ≠ | Silenciosamente descartada |
+| Error puerto | Puerto desconectado | adapter.onError() notifica |
+
+### 3. Servidor ↔ Navegador
+| Acción | Disparador | Resultado |
+|--------|-----------|-----------|
+| Usuario clic "Connect" | bridgeClient.open() | WS conecta, envía cmd startup |
+| Datos hardware válidos | adapter.onData() | broadcast() a todos clientes |
+| Cliente cierra ventana | WS onclose | bridgeServer desconecta adapter |
+
+### 4. Navegador ↔ Canvas
+| Acción | Disparador | Resultado |
+|--------|-----------|-----------|
+| btnA=true | Datos recibidos | drawRunning() dibuja |
+| btnB presionado→soltado | Transición detectada | Cambiar color aleatorio |
+| X acelerómetro cambia | Data event | updateLogic() actualiza radius |
+| Y acelerómetro cambia | Data event | updateLogic() actualiza resolución |
+
+### Decisiones de Diseño Documentadas
+
+### ✅ Por qué Adaptador Pattern
+
+**Problema**: Hardware tiene protocolo diferente
+**Solución**: Crear MicrobitV2Adapter que parsea nuevo formato
+**Beneficio**: bridgeServer.js sin cambios → arquitectura respetada
+
+### ✅ Por qué Validación Checksum
+
+**Problema**: Puertos serie pueden corromper datos
+**Solución**: Calcular checksum y comparar
+**Beneficio**: Solo datos válidos afectan canvas → usuario seguro
+
+### ✅ Por qué FSM en lugar de directo a canvas
+
+**Problema**: Lógica de transiciones es compleja
+**Solución**: Máquina de estados (ENTRY/EXIT/eventos)
+**Beneficio**: Código predecible, fácil testeable, escalable
+
+### ✅ Por qué separar updateLogic() y drawRunning()
+
+**Problema**: Mezclar mapeos con renderizado es confuso
+**Solución**: updateLogic() mapea, drawRunning() dibuja
+**Beneficio**: Debugging fácil, lógica centralizada, renderizado puro
+
+### ✅ Por qué prevA/prevB en scope de clase
+
+**Problema**: Detectar transiciones (cambios) en tiempo real
+**Solución**: Guardar estado anterior para comparación
+**Beneficio**: Puede detectar "botón soltado" (edge), no solo "presionado"
+
+---
+
+### Validación del Sistema (Testing)
+
+### Prueba 1: Trama válida
+```
+Input:  $T:100|X:500|Y:-200|A:1|B:0|CHK:701\n
+         (|500| + |-200| + 1 + 0 = 701 ✓)
+
+Output: {x:500, y:-200, btnA:true, btnB:false}
+→ Canvas actualiza: triángulo/hexágono girando
+```
+
+### Prueba 2: Trama corrupta
+```
+Input:  $T:100|X:500|Y:-200|A:1|B:0|CHK:100\n
+         (Checksum erróneo)
+
+Output: null (no emite)
+→ console.warn("Corrupt frame...")
+→ Canvas mantiene estado anterior
+```
+
+### Prueba 3: Botón A liberado
+```
+Input: {x:500, y:-200, btnA:false, btnB:true}
+
+Output: drawRunning() hace: if (mb.btnA) → false
+→ Canvas STOP dibuja
+→ (puede mostrar dibujo anterior si no se borra)
+```
+
+### Prueba 4: Botón B transición
+```
+Frame N:   prevB=true,  btnB=true
+Frame N+1: prevB=true,  btnB=false  ← LIBERACIÓN
+           if (prevB && !btnB) → TRUE
+           → Cambiar color aleatorio
+           → Siguiente polígono será otro color
+```
+
+
+### Limitaciones Conocidas
+
+### ❌ Limitación 1
+**Problema**: Si usuario presiona botón A continuamente, no hay "liberación"
+**Impacto**: Color no cambia hasta soltar A y presionar B nuevamente
+**Solución futura**: Detectar "doble clic" de A para cambiar color independientemente
+
+### ❌ Limitación 2
+**Problema**: Si micro:bit sendsRapidly (> 10Hz), algunos frames se pierden
+**Impacto**: Dibuja menos frecuente de lo que podría
+**Solución futura**: Buffer circular en adaptador para guardar frames
+
+### ❌ Limitación 3
+**Problema**: Si conexión WS cae, no reconecta automáticamente
+**Impacto**: Usuario debe hacer clic "Connect" de nuevo
+**Solución futura**: Reconexión automática con backoff exponencial
+
+### ❌ Limitación 4
+**Problema**: Checksum es suma simple (detecta ~99% corrupción pero no 100%)
+**Impacto**: Datos muy corruptos podrían pasar
+**Solución futura**: CRC16 para detectar todas las corrupturas
