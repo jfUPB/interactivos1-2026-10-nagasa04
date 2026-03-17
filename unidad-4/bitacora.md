@@ -51,226 +51,389 @@ Ejemplo de línea:
 
 ### Actividad 02
 
-### Qué se hizo
+### Objetivo
 
-### 1) Crear un nuevo adaptador (`MicrobitV2Adapter.js`)
+Construir un sistema físico interactivo que conecte el hardware del caso de estudio
+(con firmware fijo con un nuevo protocolo serial) con la pieza de arte generativo
+p5.js suministrada por el equipo de diseño.
 
-- Lee el stream serial y arma líneas usando `\n` como delimitador.
-- Parseo robusto de la trama `$...` usando split y key:value.
-- Calcula el checksum y descarta las tramas corruptas.
-- Emite exactamente el mismo objeto JSON que espera el resto del sistema:
-  `{ x: number, y: number, btnA: bool, btnB: bool }`.
+✅ Debes usar **exactamente** la misma arquitectura de software existente:
+- **Capa backend**: adaptadores (`adapters/*`) que leen el puerto serie y emiten
+  datos limpios.
+- **Capa de transporte**: `bridgeServer.js` y `bridgeClient.js` (no se modifica).
+- **Capa frontend**: `sketch.js` con la máquina de estados (`PainterTask`) que
+  actualiza estado y dibuja.
 
-### 2) Mantener la arquitectura (no se modificó `bridgeServer.js` ni `bridgeClient.js`)
+---
 
-Para que el servidor siga funcionando sin cambios, `MicrobitASCIIAdapter.js` ahora
-exporta (rebautiza) a `MicrobitV2Adapter`.
-De esta manera, el servidor sigue cargando `MicrobitASCIIAdapter.js` como siempre,
-pero recibe los datos de acuerdo al nuevo protocolo.
+### Hardware / Protocolo del dispositivo (firmware fijo)
 
-### 3) Adaptar la pieza de arte generativo al patrón FSM
+El sensor envía tramas ASCII a 115200 baudios, 10 Hz, con este formato:
 
-El código original del equipo (basado en `mouseX`, `mouseY`, `mouseIsPressed` y
-`keyIsPressed`) se trasladó a:
-- **`updateLogic()`**: convierte los valores crudos de acelerómetro en parámetros
-  de dibujo (radio y resolución de círculo) y actualiza el estado según botones.
-- **`drawRunning()`**: dibuja la forma poligonal usando ese estado, sin lógica extra.
-
-### 4) Cumplir con la especificación de la pieza entregada
-
-- **Eje Y del acelerómetro** controla la resolución del círculo.
-- **Eje X del acelerómetro** controla el radio.
-- **Botón A** actúa como el mouse presionado (activa el dibujo).
-- **Botón B** actúa como `keyIsPressed` (controla el `fill`).
-
-<details>
-
-<summary>microbitV2Adapter.js</summary>
-
-``` js
-const { SerialPort } = require("serialport");
-const BaseAdapter = require("./BaseAdapter");
-
-// Este adaptador implementa el protocolo nuevo del hardware y emite datos
-// normalizados en el formato que el resto de la aplicación espera.
-//
-// El protocolo es (10 Hz, 115200 baudios):
-// $T:tiempo|X:acel_x|Y:acel_y|A:estado_a|B:estado_b|CHK:checksum\n
-// Checksum: abs(X)+abs(Y)+A+B
-// Si el checksum no coincide, la trama se descarta con una advertencia.
-
-class MicrobitV2Adapter extends BaseAdapter {
-  constructor({ path, baud = 115200, verbose = false } = {}) {
-    super();
-
-    // Parámetros de conexión
-    this.path = path; // puerto serie, p.ej. COM3 / /dev/ttyACM0
-    this.baud = baud; // debe coincidir con el firmware del dispositivo
-
-    // Estado interno
-    this.port = null; // instancia SerialPort
-    this.buf = ""; // buffer de datos hasta encontrar \n
-    // modo verbo para debug (muestra tramas corruptas, etc.)
-    this.verbose = verbose;
-  }
-
-  // Conecta al puerto serie y empieza a escuchar datos.
-  async connect() {
-    if (this.connected) return; // evitar doble conexión
-    if (!this.path) throw new Error("serialPort is required for microbit device mode");
-
-    // Creamos el objeto SerialPort pero no lo abrimos automáticamente.
-    this.port = new SerialPort({
-      path: this.path,
-      baudRate: this.baud,
-      autoOpen: false,
-    });
-
-    // Abrimos el puerto (promesa para poder usar await)
-    await new Promise((resolve, reject) => {
-      this.port.open((err) => (err ? reject(err) : resolve()));
-    });
-
-    // Estado interno y callback de conexión
-    this.connected = true;
-    this.onConnected?.(`serial open ${this.path} @${this.baud}`);
-
-    // Escuchar eventos: datos entrantes, errores y cierre de puerto.
-    this.port.on("data", (chunk) => this._onChunk(chunk));
-    this.port.on("error", (err) => this._fail(err));
-    this.port.on("close", () => this._closed());
-  }
-
-  // Desconecta el adaptador cerrando el puerto serie.
-  async disconnect() {
-    if (!this.connected) return;
-    this.connected = false;
-
-    if (this.port && this.port.isOpen) {
-      await new Promise((resolve, reject) => {
-        this.port.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    }
-
-    // Limpiar estado para permitir reconexiones posteriores.
-    this.port = null;
-    this.buf = "";
-    this.onDisconnected?.("serial closed");
-  }
-
-  getConnectionDetail() {
-    return `serial open ${this.path}`;
-  }
-
-  // Callback que se ejecuta cada vez que llegan bytes por serial.
-  // La trama está delimitada por un salto de línea '\n'.
-  _onChunk(chunk) {
-    // acumulamos bytes en el buffer
-    this.buf += chunk.toString("utf8");
-
-    // procesamos cada línea completa (hasta \n)
-    let idx;
-    while ((idx = this.buf.indexOf("\n")) >= 0) {
-      const line = this.buf.slice(0, idx).trim();
-      this.buf = this.buf.slice(idx + 1);
-
-      if (!line) continue; // línea vacía (p.ej. \n extra)
-
-      const parsed = this._parseLine(line);
-      if (parsed) {
-        // El adaptador cumple el contrato: emite un objeto {x,y,btnA,btnB}
-        this.onData?.(parsed);
-      }
-    }
-
-    // Si por alguna razón el buffer se hace muy grande, lo limpiamos para
-    // no consumir memoria indefinidamente.
-    if (this.buf.length > 4096) this.buf = "";
-  }
-
-  // Parsea una línea completa de texto y valida el checksum.
-  // Si la trama es inválida, devuelve null para que no se propague.
-  _parseLine(line) {
-    // Cada trama debe empezar con '$'
-    if (!line.startsWith("$")) {
-      if (this.verbose) console.warn("Invalid frame start:", line);
-      return null;
-    }
-
-    // Removemos el '$' inicial y separamos por '|' para obtener pares clave:valor
-    const parts = line.slice(1).split("|");
-    const obj = {};
-
-    for (const part of parts) {
-      const [k, v] = part.split(":");
-      if (!k || v === undefined) continue;
-      obj[k] = v;
-    }
-
-    // Extraemos los valores esperados del diccionario
-    const x = Number(obj.X);
-    const y = Number(obj.Y);
-    const a = Number(obj.A);
-    const b = Number(obj.B);
-    const chk = Number(obj.CHK);
-
-    // Validaciones básicas: todo debe ser numérico.
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(chk)) {
-      if (this.verbose) console.warn("Invalid numeric values in line:", line);
-      return null;
-    }
-
-    // Calculamos el checksum según la especificación del hardware.
-    const computed = Math.abs(x) + Math.abs(y) + (a ? 1 : 0) + (b ? 1 : 0);
-    if (computed !== chk) {
-      // Trama corrupta: no actualizamos estado, pero avisamos en consola
-      console.warn("Corrupt frame (checksum mismatch):", line, "expected", computed, "got", chk);
-      return null;
-    }
-
-    // Emitimos el objeto limpio esperado por el resto de la aplicación.
-    return {
-      x: x | 0,
-      y: y | 0,
-      btnA: Boolean(a),
-      btnB: Boolean(b),
-    };
-  }
-
-  // Si hay un error grave (p.ej. puerto desconectado), avisamos y nos
-  // desconectamos para evitar estados inconsistentes.
-  _fail(err) {
-    this.onError?.(String(err?.message || err));
-    this.disconnect();
-  }
-
-  _closed() {
-    if (!this.connected) return;
-    this.connected = false;
-    this.port = null;
-    this.buf = "";
-    this.onDisconnected?.("serial closed (event)");
-  }
-
-  async writeLine(line) {
-    if (!this.port || !this.port.isOpen) return;
-    await new Promise((resolve, reject) => {
-      this.port.write(line, (err) => (err ? reject(err) : resolve()));
-    });
-  }
-
-  async handleCommand(cmd) {
-    // Este adaptador es solo de lectura; no se espera enviar comandos al micro:bit.
-  }
-}
-
-module.exports = MicrobitV2Adapter;
+```
+$T:tiempo|X:acel_x|Y:acel_y|A:estado_a|B:estado_b|CHK:checksum\n
 ```
 
-</details>
+### Diccionario de datos
+
+| Campo | Tipo | Rango | Descripción |
+|-------|------|-------|-------------|
+| T | int | 0-∞ | Timestamp en ms desde arranque del dispositivo |
+| X | int | -2048 a 2047 | Eje X del acelerómetro |
+| Y | int | -2048 a 2047 | Eje Y del acelerómetro |
+| A | int | 0 o 1 | Botón A (0=liberado, 1=presionado) |
+| B | int | 0 o 1 | Botón B (0=liberado, 1=presionado) |
+| CHK | int | 0-999 | Checksum (validación de integridad) |
+
+### Ejemplo válido
+
+```
+$T:45020|X:-245|Y:12|A:1|B:0|CHK:258\n
+```
+
+Verificación checksum:
+```
+CHK = |X| + |Y| + A + B
+    = |-245| + |12| + 1 + 0
+    = 245 + 12 + 1 + 0
+    = 258 ✓
+```
+
+### Requisito de integridad
+
+Si el `CHK` calculado ≠ `CHK` recibido:
+- La trama se **descarta silenciosamente** (no se emite onData())
+- Se emite `console.warn("Corrupt frame...")` en el servidor (para debugging)
+- El canvas **NO se actualiza**
+
+Esto garantiza que solo datos válidos afecten la visualización.
+
+---
+
+### Arquitectura implementada
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  FLUJO DE DATOS                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Hardware (micro:bit)                                         │
+│         ↓ (UART 115200 baud)                                 │
+│  MicrobitV2Adapter                                            │
+│  ├─ _onChunk(): acumula bytes en buffer                      │
+│  ├─ _parseLine(): parsea trama $...|CHK:...|               │
+│  └─ valida checksum → { x, y, btnA, btnB }                 │
+│         ↓ (this.onData?.(parsed))                            │
+│  bridgeServer.js (Node.js)                                   │
+│  └─ retransmite por WebSocket                                │
+│         ↓ (JSON por WS)                                      │
+│  Browser (p5.js)                                             │
+│  ├─ bridgeClient.js recibe JSON                              │
+│  └─ dispara EVENTS.DATA                                      │
+│         ↓                                                     │
+│  PainterTask (FSM)                                           │
+│  ├─ updateLogic(): mapea valores a parámetros               │
+│  └─ diagrama de estados:                                     │
+│      estado_esperando ↔ estado_corriendo                     │
+│         ↓                                                     │
+│  drawRunning()                                                │
+│  └─ dibuja polígono en canvas                                │
+│         ↓                                                     │
+│  Canvas (viewport)                                            │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Qué se hizo (resumen detallado)
+
+#### 1) Crear adaptador nuevo: `MicrobitV2Adapter.js`
+
+**Responsabilidad**: Procesar nuevo protocolo serial y emitir datos normalizados
+
+#### Método `_onChunk(chunk)`
+
+Callback que se dispara cuando llegan bytes por puerto serial:
+
+1. **Acumular bytes**: `this.buf += chunk.toString("utf8")`
+   - Los datos raramente llegan de una sola vez
+   - Acumulamos hasta encontrar `\n` para tener línea completa
+
+2. **Extraer líneas**: Buscar `\n` y procesar líneas completas
+   ```javascript
+   // Si buf = "$T:45020|...\n$T:45030|..." 
+   // Extraemos: "$T:45020|..."
+   // Resto sigue en buf para siguiente iteración
+   ```
+
+3. **Parsear cada línea**: Llamar a `_parseLine()` para validar
+   - Si devuelve valor (válida) → emitir `this.onData?(parsed)`
+   - Si devuelve null (corrupta) → hacer nada
+
+4. **Mantenimiento**: Si buffer crece > 4096 bytes, limpiar
+   - Protección contra protocolos rotos o puertos colgados
+
+#### Método `_parseLine(line)`
+
+Parsea y valida una línea completa:
+
+1. **Validar inicio**: Debe empezar con `$`
+2. **Split estructurado**: Dividir por `|` en pares `clave:valor`
+   ```
+   Input: "$T:45020|X:-245|Y:12|A:1|B:0|CHK:258"
+   Output dict: { T:"45020", X:"-245", Y:"12", A:"1", B:"0", CHK:"258" }
+   ```
+
+3. **Convertir a números**: `Number(obj.X)` etc
+   - Validar que sean finitos (`Number.isFinite()`)
+
+4. **VALIDACIÓN CRÍTICA – Checksum**:
+   ```javascript
+   computed = Math.abs(x) + Math.abs(y) + (a ? 1 : 0) + (b ? 1 : 0)
+   if (computed !== chk) {
+       console.warn("Corrupt frame...");
+       return null;  // ← NO emitir
+   }
+   ```
+
+5. **Emitir objeto normalizado**:
+   ```javascript
+   return {
+       x: x | 0,          // Asegurar entero
+       y: y | 0,
+       btnA: Boolean(a),  // 1→true, 0→false
+       btnB: Boolean(b)
+   };
+   ```
+
+**Por qué esto funciona**: El adaptador "promete" el mismo formato que el anterior
+→ `bridgeServer.js` sigue funcionando sin cambios → arquitectura respetada
+
+#### 2) Redirigir adaptador: `MicrobitASCIIAdapter.js`
+
+```javascript
+module.exports = require("./MicrobitV2Adapter");
+```
+
+- El servidor sigue cargando `MicrobitASCIIAdapter.js` (por eso se llama así)
+- Pero recibe el nuevo protocolo de `MicrobitV2Adapter`
+- Transparente para el resto del sistema
+
+#### 3) NO modificar transporte
+
+`bridgeServer.js` y `bridgeClient.js` permanecen **intactos**
+
+- `bridgeServer` recibe `{x, y, btnA, btnB}` y lo retransmite
+- `bridgeClient` en navegador recibe el JSON y dispara `EVENTS.DATA`
+
+#### 4) Adaptar pieza generativa: `sketch.js`
+
+Patrón FSM con dos estados:
+
+#### `estado_esperando`
+- Usuario ve cursor
+- Espera clic en "Connect"
+- Transición: CONNECT event → `estado_corriendo`
+
+#### `estado_corriendo`
+- Procesa eventos DATA
+- Llama `updateLogic()` para mapear valores
+- Llama `drawRunning()` para dibujar
+
+#### `updateLogic(data)` - Mapeos
+
+```javascript
+// EJE X: -2048 a 2047 → radio del polígono
+const radius = map(data.x, -2048, 2047, -width/2, width/2);
+
+// EJE Y: -2048 a 2047 → resolución (número de vértices 2-10)
+const circleResolution = int(map(data.y, -2048, 2047, 2, 10));
+```
+
+**Por qué estos mapeos**:
+- X controlaba `mouseX - width/2` en original (movimiento izq-dcha)
+- Y controlaba `mouseY + 100` en original (movimiento arriba-abajo)
+- Adaptamos rangos del hardware a canvas
+
+**Detección de transiciones (botón B)**:
+```javascript
+// comparar estado ANTERIOR (prevB) con ACTUAL (btnB)
+if (this.prevB && !this.rxData.btnB) {
+    // Cambiar color cuando se SUELTA botón B
+    this.c = color(random(255), random(255), random(255), ...);
+}
+```
+
+#### `drawRunning()` - Renderizado puro
+
+- Lee `this.rxData` (estado)
+- Dibuja polígono regular con p5.js
+- **ÚNICO input**: botones (A activa, B aplicaFill) y parámetros mapeados
+- **SIN lógica**: solo `beginShape() → vertex() → endShape()`
+
+---
+
+### Demostración (C1: App funciona sin fallos)
+
+#### Ejecución paso a paso
+
+1. **Terminal - Iniciar servidor**:
+   ```bash
+   cd "c:\...\Actividad 02"
+   node bridgeServer.js --device sim --wsPort 8081
+   ```
+   
+   Esperado:
+   ```
+   [INFO] WS listening on ws://127.0.0.1:8081 device=sim
+   ```
+
+2. **Navegador - Abrir y conectar**:
+   - Abrir `index.html`
+   - Abriendo DevTools (F12) ver consola
+   - Pulsar "Connect"
+   
+   Esperado en consola:
+   ```
+   WS open
+   BRIDGE STATUS: connected, sim running at 30Hz
+   Microbit ready to draw
+   ```
+
+3. **Interacción - Botones**:
+   - Pulsar "Botón A" (físico o en UI)
+   - Canvas muestra polígonos
+   - Pulsar "Botón B" mientras A está presionado
+   - Polígonos cambian de color
+
+4. **Validación**:
+   - Ningún error en consola
+   - Canvas actualiza continuamente
+   - Botones responden correctamente
+
+---
+
+### Análisis de decisiones (C2: Explica qué ves, cómo hiciste, por qué)
+
+#### Pregunta: ¿Por qué validar checksum?
+
+**Respuesta**:
+- El hardware envía datos a 115200 baud a través de UART
+- Las líneas pueden corromperse por ruido electromagnético
+- Si no validamos, dibujamos datos basura
+- El checksum (suma simple) cuesta casi nada y detecta la mayoría de corrupción
+- **Decisión**: Descartar tramas corruptas silenciosamente pero registrar en logs
+
+#### Pregunta: ¿Por qué  separar updateLogic() de drawRunning()?
+
+**Respuesta**:
+- **updateLogic()**: concentra toda la lógica (mapeos, transiciones)
+- **drawRunning()**: solo dibuja, sin "pensar"
+- Ventajas:
+  - Fácil debuggear: si falla mapeo, está en updateLogic
+  - P5.js + FSM = patrón probado
+  - Código testeable: puedo testear mapeos sin GUI
+  - Original también separaba: prototipo vs draw()
+
+#### Pregunta: ¿Por qué usar prevA/prevB como variable de clase?
+
+**Respuesta**:
+```javascript
+// MAL: if (!rxData.btnA) → detecta en 60fps, sin memoria de anterior
+// BIEN: if (this.prevB && !this.rxData.btnB) → detecta transición
+```
+- `prevA/prevB` guarda estado del frame anterior
+- Permite detectar **cambios** (edges), no solo valores
+- Si estuviera en `rxData`, se perdería cada frame
+
+#### Pregunta: ¿Qué pasa si llega trama corrupta?
+
+**Respuesta**:
+```
+Escenario: llega "$T:45020|X:-245|Y:12|A:1|B:0|CHK:100\n"
+(CHK debería ser 258)
+
+1. _parseLine() calcula: computed = 245 + 12 + 1 + 0 = 258
+2. Compara: 258 ≠ 100 → No coincide
+3. console.warn("Corrupt frame...")
+4. return null
+5. _onChunk() hace if (parsed) → false → NO emite onData()
+6. updateLogic() NO se ejecuta
+7. Canvas mantiene su estado anterior
+
+Resultado: usuario no ve cambio abrupto (seguro)
+Sistema sigue esperando siguiente trama válida
+```
+
+#### Pregunta: ¿Cómo se mapean los valores?
+
+**Respuesta**:
+```javascript
+// Acelerómetro X: -2048 a 2047
+// Canvas: -width/2 a width/2 (pixel-based)
+map(data.x, -2048, 2047, -width/2, width/2)
+
+// Acelerómetro Y: -2048 a 2047
+// Polígono: 2 a 10 vértices
+map(data.y, -2048, 2047, 2, 10)
+```
+
+- `map()` es función de p5.js que hace: `(value - min1) / (max1 - min1) * (max2 - min2) + min2`
+- Lineal
+- Si X=0 → radius=0 (polígono degenerado, punto)
+- Si X=-2048 → radius=-360 (polígono negado en piel, efecto espejo)
+
+---
+
+### Errores encontrados y corregidos
+
+| Error | Causa | Síntoma | Corrección |
+|-------|-------|---------|-----------|
+| `btnA/btnB` no detectaban transiciones | Comparaban en cada frame sin memoria | Cambio de color no se triggers | Mover `prevA/prevB` a scope de clase, no `rxData` |
+| Dibujo solo en centro fijo | Primer intento cambió traducción | No usaba acelerómetro | Volver a mapeo original: X→radio, Y→resolución |
+| Estado anterior no se reiniciaba | Primer enter a `estado_corriendo` | Detectaba falsa transición de B | Agregar `prevA=false; prevB=false;` en ENTRY |
+
+---
+
+### Limitaciones y mejoras posibles
+
+#### Limitación 1: Checksum simple
+- Solo suma, no detecta errores de orden o duplicados
+- **Mejora**: CRC16 o SHA1 (pero procesador limite)
+
+#### Limitación 2: Sin buffer de datos
+- Si hardware envía rápido, se pierde frame si bridge no lee a tiempo
+- **Mejora**: Circular buffer en adaptador
+
+#### Limitación 3: Sin persistencia
+- Si hago refresh, pierdo dibujo
+- **Mejora**: canvas.save() → localStorage
+
+#### Limitación 4: Sin logs en archivo
+- `console.warn()` solo en browser, no permanente
+- **Mejora**: endpoint API para guardar logs en servidor
+
+---
+
+### Para la sustentación
+
+**Prepara estas respuestas**:
+
+1. **"¿Cómo el hardware se conecta con p5.js?"**
+   → Adapter → WebSocket → FSM → canvas... (mostrar diagrama)
+
+2. **"¿Qué sucede si la trama viene corrupta?"**
+   → Se descarta, se registra warn, canvas no cambia
+
+3. **"¿Por qué X controla radio e Y controla resolución?"**
+   → Porque el prototipo original usaba mouseX y mouseY para eso
+
+4. **"¿Dónde está la lógica de transición de color?"**
+   → En updateLogic(), detección `prevB && !btnB`
+
+5. **"¿Qué pasa si presiono botón A?"**
+   → `btnA=true` → `drawRunning()` dibuja polígonos
 
 ## Bitácora de reflexión
 
