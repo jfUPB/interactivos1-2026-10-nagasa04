@@ -148,8 +148,6 @@ Se integró el firmware nuevo del micro:bit respetando la arquitectura existente
 
 ### Actividad 03
 
-### Bitácora - Unidad 4 - Actividad 03
-
 ### Objetivo
 Documentar el diagrama detallado del sistema físico interactivo construido en la actividad anterior, incluyendo componentes, flujo de información e interacciones clave.
 
