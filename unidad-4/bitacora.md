@@ -144,11 +144,6 @@ Se integró el firmware nuevo del micro:bit respetando la arquitectura existente
 
 </details>
 
-### ❌ Limitación 4
-**Problema**: Checksum es suma simple (detecta ~99% corrupción pero no 100%)
-**Impacto**: Datos muy corruptos podrían pasar
-**Solución futura**: CRC16 para detectar todas las corrupturas
-
 ## Bitácora de reflexión
 
 ### Actividad 03
